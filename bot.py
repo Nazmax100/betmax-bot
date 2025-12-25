@@ -6,20 +6,19 @@ import threading
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-# --- إعداد سيرفر وهمي لإرضاء منصة Render المجانية ---
+# --- سيرفر وهمي لمنصة Render ---
 class WebServerHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Bot is Running!")
+        self.wfile.write(b"BETMAX Bot is Active!")
 
 def run_web_server():
-    # Render يمرر منفذ (Port) تلقائياً، وإذا لم يجده يستخدم 8080
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(('0.0.0.0', port), WebServerHandler)
     server.serve_forever()
 
-# --- الإعدادات الأساسية ---
+# --- الإعدادات ---
 TOKEN = '7675556594:AAGQpCGTAIdQ7YPBTeePTAKGxtb25-BRL08'
 ADMIN_ID = 7528722019 
 
@@ -34,7 +33,8 @@ def init_db():
     conn.commit()
     conn.close()
 
-# --- أوامر المدير ---
+# --- أوامر المدير (أنت فقط) ---
+
 async def add_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID:
         if not context.args:
@@ -46,7 +46,40 @@ async def add_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         c.execute('INSERT OR IGNORE INTO authorized_users (username) VALUES (?)', (target_username,))
         conn.commit()
         conn.close()
-        await update.message.reply_text(f"✅ تمت إضافة {target_username}")
+        await update.message.reply_text(f"✅ تمت إضافة {target_username} للقائمة.")
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id == ADMIN_ID:
+        conn = sqlite3.connect('users.db')
+        c = conn.cursor()
+        c.execute('SELECT COUNT(*) FROM authorized_users')
+        total_added = c.fetchone()[0]
+        c.execute('SELECT COUNT(*) FROM authorized_users WHERE user_id IS NOT NULL')
+        active_users = c.fetchone()[0]
+        conn.close()
+        await update.message.reply_text(
+            f"📊 **إحصائيات BETMAX:**\n\n"
+            f"🔹 إجمالي المضافين: {total_added}\n"
+            f"✅ المشتركون النشطون (ضغطوا Start): {active_users}\n"
+            f"⏳ في انتظار التفعيل: {total_added - active_users}"
+        )
+
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id == ADMIN_ID:
+        conn = sqlite3.connect('users.db')
+        c = conn.cursor()
+        c.execute('SELECT username, user_id FROM authorized_users')
+        users = c.fetchall()
+        conn.close()
+        if not users:
+            await update.message.reply_text("القائمة فارغة حالياً.")
+            return
+        
+        text = "📋 **قائمة المستخدمين:**\n\n"
+        for user in users:
+            status = "✅ نشط" if user[1] else "⏳ لم يفعل بعد"
+            text += f"• @{user[0]} ({status})\n"
+        await update.message.reply_text(text)
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID:
@@ -65,7 +98,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_message(chat_id=user[0], text=msg, parse_mode='Markdown')
                 sent += 1
             except: continue
-        await update.message.reply_text(f"🚀 أرسلت إلى {sent}")
+        await update.message.reply_text(f"🚀 تم الإرسال إلى {sent} مشترك.")
 
 # --- أوامر المستخدمين ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -77,22 +110,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if c.fetchone():
         c.execute('UPDATE authorized_users SET user_id=? WHERE username=?', (user_id, username))
         conn.commit()
-        await update.message.reply_text("✅ تم تفعيل اشتراكك!")
+        await update.message.reply_text("✅ تم تفعيل اشتراكك في BETMAX!")
     else:
-        await update.message.reply_text("🚫 غير مسجل. تواصل مع الإدارة.")
+        await update.message.reply_text("🚫 غير مسجل. تواصل مع الإدارة للإضافة.")
     conn.close()
 
 if __name__ == '__main__':
     init_db()
-    
-    # تشغيل السيرفر الوهمي في "خيط" (Thread) منفصل
     threading.Thread(target=run_web_server, daemon=True).start()
-    
-    # تشغيل البوت
     app = Application.builder().token(TOKEN).build()
+    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("add", add_user))
+    app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CommandHandler("list", list_users))
     app.add_handler(CommandHandler("send", broadcast))
     
-    print("🚀 البوت يعمل الآن بنظام الـ Web Service المجاني...")
     app.run_polling()
