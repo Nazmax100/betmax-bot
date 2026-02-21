@@ -42,6 +42,15 @@ def get_conn():
     conn.row_factory = sqlite3.Row
     return conn
 
+def get_user_id_by_target(target):
+    conn = get_conn()
+    if target.startswith('@'):
+        row = conn.execute("SELECT user_id FROM users WHERE username=?", (target,)).fetchone()
+    else:
+        row = conn.execute("SELECT user_id FROM users WHERE user_id=?", (int(target),)).fetchone()
+    conn.close()
+    return row['user_id'] if row else None
+
 # ─── الأوامر ──────────────────────────────────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id  = update.effective_user.id
@@ -89,6 +98,16 @@ async def add_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if cur.rowcount > 0:
         label = "دائم ♾️" if days == 999 else f"{days} يوم"
         await update.message.reply_text(f"✅ تم تفعيل {target} لمدة {label}")
+        # إشعار للمستخدم
+        try:
+            uid = get_user_id_by_target(target)
+            if uid:
+                await context.bot.send_message(
+                    chat_id=uid,
+                    text=f"🎉 تم تفعيل اشتراكك!\n⏳ المدة: {label}\n📅 ينتهي: {exp[:10]}"
+                )
+        except Exception as e:
+            logger.warning(f"Could not notify user: {e}")
     else:
         await update.message.reply_text("❌ المستخدم غير موجود، يجب أن يضغط /start أولاً")
 
@@ -99,9 +118,10 @@ async def remove_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ الاستخدام: /remove @username")
         return
 
-    target  = context.args[0]
-    expired = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    target = context.args[0]
+    uid = get_user_id_by_target(target)
 
+    expired = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     conn = get_conn()
     if target.startswith('@'):
         cur = conn.execute("UPDATE users SET expiration_date=? WHERE username=?", (expired, target))
@@ -112,6 +132,15 @@ async def remove_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if cur.rowcount > 0:
         await update.message.reply_text(f"🚫 تم إلغاء اشتراك {target}")
+        # إشعار للمستخدم
+        try:
+            if uid:
+                await context.bot.send_message(
+                    chat_id=uid,
+                    text="❌ تم إلغاء اشتراكك.\nللتجديد تواصل مع المدير."
+                )
+        except Exception as e:
+            logger.warning(f"Could not notify user: {e}")
     else:
         await update.message.reply_text("❌ المستخدم غير موجود")
 
