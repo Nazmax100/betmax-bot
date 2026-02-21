@@ -32,17 +32,16 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS authorized_users 
                  (user_id INTEGER PRIMARY KEY, 
                   username TEXT, 
-                  expiry_date TEXT)''') # expiry_date سيكون NULL للمشترك الدائم
+                  expiry_date TEXT)''')
     conn.commit()
     conn.close()
 
 # --- أوامر المدير ---
 
-# 1. إضافة مشترك دائم
 async def add_permanent(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID:
         if not context.args:
-            await update.message.reply_text("❌ أرسل اليوزرنيم. مثال: /add user123")
+            await update.message.reply_text("❌ أرسل اليوزرنيم.")
             return
         target = context.args[0].replace('@', '').lower()
         conn = sqlite3.connect('users.db')
@@ -52,11 +51,10 @@ async def add_permanent(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.close()
         await update.message.reply_text(f"✅ تم إضافة {target} كمشترك دائم.")
 
-# 2. إضافة تجربة مجانية (3 أيام)
 async def add_trial(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID:
         if not context.args:
-            await update.message.reply_text("❌ أرسل اليوزرنيم. مثال: /trial user123")
+            await update.message.reply_text("❌ أرسل اليوزرنيم.")
             return
         target = context.args[0].replace('@', '').lower()
         expiry = (datetime.now() + timedelta(days=3)).strftime('%Y-%m-%d %H:%M:%S')
@@ -67,14 +65,27 @@ async def add_trial(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.close()
         await update.message.reply_text(f"⏳ تم إضافة {target} تجربة لمدة 3 أيام.\nينتهي في: {expiry}")
 
-# 3. النشر (صور ونصوص)
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id == ADMIN_ID:
         conn = sqlite3.connect('users.db')
         c = conn.cursor()
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        # جلب الدائمين + الذين لم تنتهِ تجربتهم
-        c.execute('SELECT user_id FROM authorized_users WHERE user_id IS NOT NULL AND (expiry_date IS NULL OR expiry_date > ?)', (now,))
+        now_dt = datetime.now()
+        now_str = now_dt.strftime('%Y-%m-%d %H:%M:%S')
+
+        # 1. التعامل مع المنتهية صلاحيتهم قبل الإرسال
+        c.execute('SELECT user_id, username FROM authorized_users WHERE expiry_date <= ? AND user_id IS NOT NULL', (now_str,))
+        expired_users = c.fetchall()
+        for u_id, u_name in expired_users:
+            try:
+                await context.bot.send_message(chat_id=u_id, text="⚠️ انتهت مدة تجربتك المجانية.\nللاستمرار في استلام التوقعات، يرجى التواصل مع الإدارة لتفعيل الاشتراك الدائم.")
+            except: pass
+            # حذف المشترك المنتهي من القاعدة
+            c.execute('DELETE FROM authorized_users WHERE user_id = ?', (u_id,))
+        
+        conn.commit()
+
+        # 2. جلب المشتركين المتبقين (الدائمين والنشطين)
+        c.execute('SELECT user_id FROM authorized_users WHERE user_id IS NOT NULL')
         users = c.fetchall()
         conn.close()
 
@@ -88,7 +99,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await context.bot.send_message(chat_id=user[0], text=text_to_send)
                 sent += 1
             except: continue
-        await update.message.reply_text(f"🚀 تم النشر لـ {sent} مشترك.")
+        await update.message.reply_text(f"🚀 تم النشر لـ {sent} مشترك.\n(تم تنبيه وحذف الحسابات المنتهية تلقائياً)")
 
 # --- أوامر المشتركين ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -105,11 +116,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if row:
         expiry_str = row[0]
-        if expiry_str is None: # مشترك دائم
+        if expiry_str is None:
             c.execute('UPDATE authorized_users SET user_id=? WHERE username=?', (user_id, username))
             conn.commit()
             await update.message.reply_text("✅ تم تفعيل اشتراكك الدائم!")
-        else: # مشترك تجربة
+        else:
             expiry = datetime.strptime(expiry_str, '%Y-%m-%d %H:%M:%S')
             if datetime.now() < expiry:
                 c.execute('UPDATE authorized_users SET user_id=? WHERE username=?', (user_id, username))
