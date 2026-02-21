@@ -15,8 +15,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ─── الإعدادات (استخدم متغيرات البيئة دائماً) ────────────────────────────────
-TOKEN    = os.environ.get("BOT_TOKEN", "YOUR_TOKEN_HERE")
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
+TOKEN    = "7675556594:AAGQpCGTAIdQ7YPBTeePTAKGxtb25-BRL08"
+ADMIN_ID = 7528722019
 
 DB_PATH  = os.environ.get("DB_PATH", "users.db")
 
@@ -221,10 +221,7 @@ async def my_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ─── نقطة البداية ─────────────────────────────────────────────────────────────
 if __name__ == '__main__':
-    if not TOKEN or TOKEN == "YOUR_TOKEN_HERE":
-        raise ValueError("❌ يجب تعيين BOT_TOKEN كمتغير بيئة!")
-    if not ADMIN_ID:
-        raise ValueError("❌ يجب تعيين ADMIN_ID كمتغير بيئة!")
+
 
     init_db()
     threading.Thread(target=run_wakeup_server, daemon=True).start()
