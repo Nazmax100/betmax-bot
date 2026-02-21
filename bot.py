@@ -1,25 +1,35 @@
-async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # التأكد من أن المرسل هو المدير
-    if update.effective_user.id != ADMIN_ID:
-        return
-
+async def add_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID: return
     try:
-        # استخراج المعطيات: /add [user_id] [days]
-        user_id = int(context.args[0])
+        # استلام المدخلات: /add @username days
+        target_input = context.args[0]
         days = int(context.args[1])
         
-        expiration_date = datetime.now() + timedelta(days=days)
-        
+        # تجهيز تاريخ الانتهاء
+        if days == 999:
+            exp_date = datetime.now() + timedelta(days=36500)
+            status = "دائم ♾️"
+        else:
+            exp_date = datetime.now() + timedelta(days=days)
+            status = f"{days} يوم"
+
         conn = sqlite3.connect('users.db')
         c = conn.cursor()
-        # تحديث أو إضافة المستخدم مع تاريخ انتهاء حسب عدد الأيام
-        c.execute("INSERT OR REPLACE INTO users (user_id, expiration_date) VALUES (?, ?)",
-                  (user_id, expiration_date.strftime('%Y-%m-%d %H:%M:%S')))
-        conn.commit()
-        conn.close()
 
-        msg = f"✅ تم تفعيل الاشتراك بنجاح!\n👤 الآيدي: `{user_id}`\n⏳ المدة: {days} يوم/أيام\n📅 ينتهي في: {expiration_date.strftime('%Y-%m-%d')}"
-        await update.message.reply_text(msg, parse_mode='Markdown')
+        # البحث وتحديث التاريخ بناءً على اسم المستخدم أو الآيدي
+        if target_input.startswith('@'):
+            c.execute("UPDATE users SET expiration_date = ? WHERE username = ?", 
+                      (exp_date.strftime('%Y-%m-%d %H:%M:%S'), target_input))
+        else:
+            c.execute("UPDATE users SET expiration_date = ? WHERE user_id = ?", 
+                      (exp_date.strftime('%Y-%m-%d %H:%M:%S'), int(target_input)))
         
-    except (IndexError, ValueError):
-        await update.message.reply_text("⚠️ خطأ! الطريقة الصحيحة:\n`/add [ID] [عدد_الأيام]`\nمثال: `/add 12345 3` للتجربة.")
+        if c.rowcount > 0:
+            conn.commit()
+            await update.message.reply_text(f"✅ تم تفعيل اشتراك {target_input} لمدة {status}")
+        else:
+            await update.message.reply_text(f"❌ لم أجد مستخدم بهذا الاسم ({target_input}) في قاعدة البيانات. يجب أن يضغط المستخدم على /start أولاً.")
+        
+        conn.close()
+    except:
+        await update.message.reply_text("⚠️ الطريقة: `/add @username الأيام`\nمثال: `/add @Ahmad 3`")
