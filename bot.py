@@ -4,216 +4,344 @@ import threading
 import logging
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup
+)
+
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    ContextTypes
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TOKEN    = "7675556594:AAGQpCGTAIdQ7YPBTeePTAKGxtb25-BRL08"
-ADMIN_ID = 7528722019
+TOKEN = "PUT_TOKEN_HERE"
+ADMIN_ID = 123456789
 
-# ─── سيرفر الإيقاظ ───────────────────────────────────────────────────────────
+CHANNEL_ID = -1001234567890
+CHANNEL_LINK = "https://t.me/yourchannel"
+
+# ───────── Wakeup Server ─────────
+
 class WakeUpHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Bot is online")
+        self.wfile.write(b"Bot Running")
+
     def log_message(self, format, *args):
         pass
+
 
 def run_server():
     port = int(os.environ.get("PORT", 8080))
     HTTPServer(('0.0.0.0', port), WakeUpHandler).serve_forever()
 
-# ─── قاعدة البيانات ───────────────────────────────────────────────────────────
+
+# ───────── Database ─────────
+
 def init_db():
     conn = sqlite3.connect('users.db')
-    conn.execute('''CREATE TABLE IF NOT EXISTS users (
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS users(
         user_id INTEGER PRIMARY KEY,
         username TEXT,
         expiration_date TEXT
-    )''')
+        )
+    ''')
     conn.commit()
     conn.close()
+
 
 def get_conn():
     conn = sqlite3.connect('users.db', check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
-def get_user_id_by_target(target):
-    conn = get_conn()
-    if target.startswith('@'):
-        row = conn.execute("SELECT user_id FROM users WHERE username=?", (target,)).fetchone()
-    else:
-        row = conn.execute("SELECT user_id FROM users WHERE user_id=?", (int(target),)).fetchone()
-    conn.close()
-    return row['user_id'] if row else None
 
-# ─── الأوامر ──────────────────────────────────────────────────────────────────
+# ───────── Start Menu ─────────
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id  = update.effective_user.id
-    username = f"@{update.effective_user.username}" if update.effective_user.username else "None"
-    now      = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    keyboard = [
+        [InlineKeyboardButton("📝 التسجيل", callback_data="register")],
+        [InlineKeyboardButton("🎁 تجربة مجانية", callback_data="trial")],
+        [InlineKeyboardButton("💰 عرض الاشتراك", callback_data="offer")],
+        [InlineKeyboardButton("📊 حالة اشتراكي", callback_data="status")],
+        [InlineKeyboardButton("📞 تواصل مع الإدارة", callback_data="admin")]
+    ]
+
+    await update.message.reply_text(
+        "👋 مرحباً بك في بوت توقعات كرة القدم ⚽",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+# ───────── Buttons ─────────
+
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    username = f"@{query.from_user.username}" if query.from_user.username else "None"
+
+    # طلب التسجيل
+    if query.data == "register":
+
+        await query.message.reply_text(
+            "📩 تم إرسال طلب التسجيل للإدارة."
+        )
+
+        await context.bot.send_message(
+            ADMIN_ID,
+            f"📥 طلب تسجيل جديد\nID: {user_id}\nUSER: {username}"
+        )
+
+    # تجربة مجانية
+    elif query.data == "trial":
+
+        exp = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S')
+
+        conn = get_conn()
+
+        conn.execute(
+            "INSERT OR REPLACE INTO users VALUES (?,?,?)",
+            (user_id, username, exp)
+        )
+
+        conn.commit()
+        conn.close()
+
+        await query.message.reply_text(
+            f"🎁 حصلت على تجربة مجانية!\n\nادخل القناة:\n{CHANNEL_LINK}"
+        )
+
+    # عرض الاشتراك
+    elif query.data == "offer":
+
+        await query.message.reply_text(
+            "💰 عروض الاشتراك:\n\n"
+            "7 أيام = 5$\n"
+            "30 يوم = 15$\n"
+            "90 يوم = 35$\n\n"
+            "للاشتراك تواصل مع الإدارة."
+        )
+
+    # حالة الاشتراك
+    elif query.data == "status":
+
+        conn = get_conn()
+
+        row = conn.execute(
+            "SELECT expiration_date FROM users WHERE user_id=?",
+            (user_id,)
+        ).fetchone()
+
+        conn.close()
+
+        if not row:
+            await query.message.reply_text("❌ لا يوجد اشتراك")
+            return
+
+        exp = datetime.strptime(row['expiration_date'], '%Y-%m-%d %H:%M:%S')
+
+        if exp > datetime.now():
+
+            remaining = (exp - datetime.now()).days
+
+            await query.message.reply_text(
+                f"✅ اشتراكك نشط\n"
+                f"📅 ينتهي: {exp.strftime('%Y-%m-%d')}\n"
+                f"⏳ المتبقي: {remaining} يوم"
+            )
+
+        else:
+            await query.message.reply_text("❌ اشتراكك منتهي")
+
+    # تواصل مع الإدارة
+    elif query.data == "admin":
+
+        await query.message.reply_text(
+            "📞 تواصل مع الإدارة:\n@YourUsername"
+        )
+
+
+# ───────── Admin Commands ─────────
+
+async def add_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    if len(context.args) < 2:
+        await update.message.reply_text("/add USER_ID DAYS")
+        return
+
+    user_id = int(context.args[0])
+    days = int(context.args[1])
+
+    exp = (datetime.now() + timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
 
     conn = get_conn()
-    conn.execute('''INSERT INTO users (user_id, username, expiration_date)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT(user_id) DO UPDATE SET username=excluded.username''',
-                 (user_id, username, now))
+
+    conn.execute(
+        "INSERT OR REPLACE INTO users VALUES (?,?,?)",
+        (user_id, "None", exp)
+    )
+
     conn.commit()
+    conn.close()
+
+    await update.message.reply_text("✅ تم تفعيل الاشتراك")
+
+    try:
+        await context.bot.send_message(
+            user_id,
+            f"✅ تم تفعيل اشتراكك!\n\nادخل القناة:\n{CHANNEL_LINK}"
+        )
+    except:
+        pass
+
+
+async def remove_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    user_id = int(context.args[0])
+
+    exp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    conn = get_conn()
+
+    conn.execute(
+        "UPDATE users SET expiration_date=? WHERE user_id=?",
+        (exp, user_id)
+    )
+
+    conn.commit()
+    conn.close()
+
+    await update.message.reply_text("🚫 تم إلغاء الاشتراك")
+
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    conn = get_conn()
+
+    active = conn.execute(
+        "SELECT COUNT(*) FROM users WHERE expiration_date > ?",
+        (now,)
+    ).fetchone()[0]
+
+    inactive = conn.execute(
+        "SELECT COUNT(*) FROM users WHERE expiration_date <= ?",
+        (now,)
+    ).fetchone()[0]
+
     conn.close()
 
     await update.message.reply_text(
-        f"🚀 تم التسجيل\n🆔 ID: `{user_id}`\n👤 User: {username}",
-        parse_mode="Markdown"
+        f"📊 الإحصائيات\n\n"
+        f"نشط: {active}\n"
+        f"منتهي: {inactive}"
     )
 
-async def add_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    if len(context.args) < 2:
-        await update.message.reply_text("⚠️ الاستخدام: /add @username 30")
-        return
-
-    target = context.args[0]
-    try:
-        days = int(context.args[1])
-    except:
-        await update.message.reply_text("❌ عدد الأيام يجب أن يكون رقماً")
-        return
-
-    actual_days = 36500 if days == 999 else days
-    exp = (datetime.now() + timedelta(days=actual_days)).strftime('%Y-%m-%d %H:%M:%S')
-
-    conn = get_conn()
-    if target.startswith('@'):
-        cur = conn.execute("UPDATE users SET expiration_date=? WHERE username=?", (exp, target))
-    else:
-        cur = conn.execute("UPDATE users SET expiration_date=? WHERE user_id=?", (exp, int(target)))
-    conn.commit()
-    conn.close()
-
-    if cur.rowcount > 0:
-        label = "دائم ♾️" if days == 999 else f"{days} يوم"
-        await update.message.reply_text(f"✅ تم تفعيل {target} لمدة {label}")
-        # إشعار للمستخدم
-        try:
-            uid = get_user_id_by_target(target)
-            if uid:
-                await context.bot.send_message(
-                    chat_id=uid,
-                    text=f"🎉 تم تفعيل اشتراكك!\n⏳ المدة: {label}\n📅 ينتهي: {exp[:10]}"
-                )
-        except Exception as e:
-            logger.warning(f"Could not notify user: {e}")
-    else:
-        await update.message.reply_text("❌ المستخدم غير موجود، يجب أن يضغط /start أولاً")
-
-async def remove_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    if not context.args:
-        await update.message.reply_text("⚠️ الاستخدام: /remove @username")
-        return
-
-    target = context.args[0]
-    uid = get_user_id_by_target(target)
-
-    expired = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    conn = get_conn()
-    if target.startswith('@'):
-        cur = conn.execute("UPDATE users SET expiration_date=? WHERE username=?", (expired, target))
-    else:
-        cur = conn.execute("UPDATE users SET expiration_date=? WHERE user_id=?", (expired, int(target)))
-    conn.commit()
-    conn.close()
-
-    if cur.rowcount > 0:
-        await update.message.reply_text(f"🚫 تم إلغاء اشتراك {target}")
-        # إشعار للمستخدم
-        try:
-            if uid:
-                await context.bot.send_message(
-                    chat_id=uid,
-                    text="❌ تم إلغاء اشتراكك.\nللتجديد تواصل مع المدير."
-                )
-        except Exception as e:
-            logger.warning(f"Could not notify user: {e}")
-    else:
-        await update.message.reply_text("❌ المستخدم غير موجود")
-
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    now  = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    conn = get_conn()
-    active   = conn.execute("SELECT COUNT(*) FROM users WHERE expiration_date > ?", (now,)).fetchone()[0]
-    inactive = conn.execute("SELECT COUNT(*) FROM users WHERE expiration_date <= ?", (now,)).fetchone()[0]
-    users    = conn.execute("SELECT username, user_id, expiration_date FROM users WHERE expiration_date > ?", (now,)).fetchall()
-    conn.close()
-
-    lines = [f"📊 *إحصائيات البوت*\n✅ نشط: {active} | ❌ منتهي: {inactive}\n"]
-    for u in users:
-        lines.append(f"👤 {u['username']} (`{u['user_id']}`) — حتى {u['expiration_date'][:10]}")
-
-    await update.message.reply_text("\n".join(lines) if users else "لا يوجد مشتركون نشطون", parse_mode="Markdown")
 
 async def send_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     if update.effective_user.id != ADMIN_ID:
         return
-    text = " ".join(context.args).strip()
+
+    text = " ".join(context.args)
+
     if not text:
-        await update.message.reply_text("⚠️ أرسل نصاً بعد الأمر")
         return
 
     conn = get_conn()
-    ids  = [row[0] for row in conn.execute("SELECT user_id FROM users").fetchall()]
+
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    ids = [
+        row[0] for row in conn.execute(
+            "SELECT user_id FROM users WHERE expiration_date > ?",
+            (now,)
+        ).fetchall()
+    ]
+
     conn.close()
 
-    success, failed = 0, 0
+    sent = 0
+
     for uid in ids:
+
         try:
-            await context.bot.send_message(chat_id=uid, text=text)
-            success += 1
+            await context.bot.send_message(uid, text)
+            sent += 1
         except:
-            failed += 1
+            pass
 
-    await update.message.reply_text(f"📢 تم الإرسال\n✅ نجح: {success} | ❌ فشل: {failed}")
+    await update.message.reply_text(f"📢 تم الإرسال إلى {sent}")
 
-async def my_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    conn    = get_conn()
-    row     = conn.execute("SELECT expiration_date FROM users WHERE user_id=?", (user_id,)).fetchone()
+
+# ───────── Auto remove expired users ─────────
+
+async def check_subscriptions(context: ContextTypes.DEFAULT_TYPE):
+
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    conn = get_conn()
+
+    users = conn.execute(
+        "SELECT user_id FROM users WHERE expiration_date <= ?",
+        (now,)
+    ).fetchall()
+
     conn.close()
 
-    if not row:
-        await update.message.reply_text("❌ أنت غير مسجّل، استخدم /start أولاً")
-        return
+    for u in users:
 
-    exp = datetime.strptime(row['expiration_date'], '%Y-%m-%d %H:%M:%S')
-    if exp > datetime.now():
-        remaining = (exp - datetime.now()).days
-        await update.message.reply_text(
-            f"✅ اشتراكك نشط\n📅 ينتهي: {exp.strftime('%Y-%m-%d')}\n⏳ المتبقي: {remaining} يوم"
-        )
-    else:
-        await update.message.reply_text("❌ اشتراكك منتهٍ، تواصل مع المدير")
+        try:
+            await context.bot.ban_chat_member(CHANNEL_ID, u['user_id'])
+            await context.bot.unban_chat_member(CHANNEL_ID, u['user_id'])
+        except:
+            pass
 
-# ─── التشغيل ──────────────────────────────────────────────────────────────────
-if __name__ == '__main__':
+
+# ───────── Run Bot ─────────
+
+if __name__ == "__main__":
+
     init_db()
+
     threading.Thread(target=run_server, daemon=True).start()
 
     app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start",  start))
-    app.add_handler(CommandHandler("add",    add_user))
-    app.add_handler(CommandHandler("remove", remove_user))
-    app.add_handler(CommandHandler("stats",  stats))
-    app.add_handler(CommandHandler("send",   send_all))
-    app.add_handler(CommandHandler("status", my_status))
 
-    logger.info("✅ Bot started!")
+    app.add_handler(CommandHandler("start", start))
+
+    app.add_handler(CommandHandler("add", add_user))
+    app.add_handler(CommandHandler("remove", remove_user))
+    app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CommandHandler("send", send_all))
+
+    app.add_handler(CallbackQueryHandler(buttons))
+
+    app.job_queue.run_repeating(check_subscriptions, interval=3600, first=10)
+
+    logger.info("Bot started")
+
     app.run_polling()
