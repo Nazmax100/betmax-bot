@@ -89,7 +89,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("📝 طلب الاشتراك", callback_data="register")],
         [InlineKeyboardButton("🎁 تجربة مجانية", callback_data="trial")],
-        [InlineKeyboardButton("💰 عروض الاشتراك", callback_data="offer")],
         [InlineKeyboardButton("📊 حالة اشتراكي", callback_data="status")],
         [InlineKeyboardButton("📞 تواصل مع الإدارة", callback_data="admin")]
     ]
@@ -128,30 +127,45 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.close()
 
         if row:
-            await query.message.reply_text("⚠️ لقد استخدمت التجربة المجانية من قبل.")
+            await query.message.reply_text(
+                "⚠️ لقد استخدمت التجربة المجانية من قبل.\n"
+                "للاشتراك تواصل مع الإدارة: @betmax_team"
+            )
             return
 
-        exp = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S')
+        # تفعيل حتى نهاية اليوم الحالي (منتصف الليل)
+        end_of_day = datetime.now().replace(hour=23, minute=59, second=59)
+        exp = end_of_day.strftime('%Y-%m-%d %H:%M:%S')
+
         conn = get_conn()
         conn.execute("INSERT OR REPLACE INTO users VALUES (?,?,?)", (user_id, username, exp))
         conn.commit()
         conn.close()
 
         await query.message.reply_text(
-            f"🎁 *تم تفعيل التجربة المجانية!*\n\n"
-            f"⏳ مدتها: 24 ساعة\n"
-            f"📢 رابط القناة: {CHANNEL_LINK}",
+            f"🎁 *تم تفعيل تجربتك المجانية!*\n\n"
+            f"⏳ تنتهي اليوم في: *11:59 مساءً*\n\n"
+            "ستصلك التوقعات تلقائياً ⚽🎯",
             parse_mode="Markdown"
         )
 
-    elif query.data == "offer":
-        await query.message.reply_text(
-            "💰 *عروض الاشتراك:*\n\n"
-            "🔹 7 أيام = 5$\n"
-            "🔹 30 يوم = 15$\n"
-            "🔹 90 يوم = 35$\n\n"
-            "للاشتراك تواصل مع الإدارة 👇",
+        # إشعار الإدارة
+        await context.bot.send_message(
+            ADMIN_ID,
+            f"🎁 *تجربة مجانية مُفعَّلة*\n\n"
+            f"🆔 ID: `{user_id}`\n"
+            f"👤 اليوزر: {username}\n"
+            f"📅 تنتهي: {end_of_day.strftime('%Y-%m-%d 23:59')}",
             parse_mode="Markdown"
+        )
+
+        # جدولة رسالة انتهاء الاشتراك
+        seconds_until_end = (end_of_day - datetime.now()).total_seconds()
+        context.job_queue.run_once(
+            send_expiry_message,
+            when=seconds_until_end,
+            data=user_id,
+            name=f"expiry_{user_id}"
         )
 
     elif query.data == "status":
@@ -183,9 +197,28 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "admin":
         await query.message.reply_text(
             "📞 *تواصل مع الإدارة:*\n\n"
-            "@YourUsername",  # ← غيّر هذا
+            "@betmax_team",
             parse_mode="Markdown"
         )
+
+# ───────── Expiry Notification ─────────
+
+async def send_expiry_message(context: ContextTypes.DEFAULT_TYPE):
+    user_id = context.job.data
+    try:
+        await context.bot.send_message(
+            user_id,
+            "⏰ *انتهت تجربتك المجانية!*\n\n"
+            "نأمل أنك استمتعت بتوقعاتنا ⚽\n\n"
+            "للاستمرار في استقبال التوقعات اشترك معنا:\n"
+            "🔹 يوم واحد = 4$\n"
+            "🔹 أسبوع = 15$\n"
+            "🔹 شهر = 50$\n\n"
+            "📞 تواصل مع الإدارة: @betmax_team",
+            parse_mode="Markdown"
+        )
+    except Exception:
+        pass
 
 # ───────── Admin: /add ─────────
 
@@ -351,6 +384,21 @@ async def check_subscriptions(context: ContextTypes.DEFAULT_TYPE):
     ).fetchall()
     conn.close()
     for u in users:
+        # إرسال رسالة انتهاء الاشتراك
+        try:
+            await context.bot.send_message(
+                u['user_id'],
+                "⏰ *انتهى اشتراكك!*\n\n"
+                "للاستمرار في استقبال التوقعات اشترك معنا:\n"
+                "🔹 يوم واحد = 4$\n"
+                "🔹 أسبوع = 15$\n"
+                "🔹 شهر = 50$\n\n"
+                "📞 تواصل مع الإدارة: @betmax_team",
+                parse_mode="Markdown"
+            )
+        except Exception:
+            pass
+        # طرد من القناة
         try:
             await context.bot.ban_chat_member(CHANNEL_ID, u['user_id'])
             await context.bot.unban_chat_member(CHANNEL_ID, u['user_id'])
