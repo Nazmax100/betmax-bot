@@ -21,7 +21,6 @@ TOKEN = "7675556594:AAGQpCGTAIdQ7YPBTeePTAKGxtb25-BRL08"
 ADMIN_ID = 7528722019
 
 CHANNEL_ID = -1001234567890   # ← معرف قناتك (اختياري)
-CHANNEL_LINK = "https://t.me/yourchannel"  # ← رابط قناتك
 
 # ───────── Wakeup Server (لمنع النوم على Render/Railway) ─────────
 
@@ -192,12 +191,17 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
         else:
-            await query.message.reply_text("❌ اشتراكك منتهٍ.\nتواصل مع الإدارة للتجديد.")
-
+            keyboard = [[InlineKeyboardButton("💬 تواصل مع الإدارة", url="https://t.me/betmax_team")]]
+            await query.message.reply_text(
+                "❌ *اشتراكك منتهٍ*\n\nللتجديد تواصل مع الإدارة 👇",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="Markdown"
+            )
     elif query.data == "admin":
+        keyboard = [[InlineKeyboardButton("💬 تواصل مع الإدارة", url="https://t.me/betmax_team")]]
         await query.message.reply_text(
-            "📞 *تواصل مع الإدارة:*\n\n"
-            "@betmax_team",
+            "📞 *تواصل مع الإدارة:*",
+            reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
         )
 
@@ -205,16 +209,14 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def send_expiry_message(context: ContextTypes.DEFAULT_TYPE):
     user_id = context.job.data
+    keyboard = [[InlineKeyboardButton("💬 تواصل مع الإدارة", url="https://t.me/betmax_team")]]
     try:
         await context.bot.send_message(
             user_id,
             "⏰ *انتهت تجربتك المجانية!*\n\n"
             "نأمل أنك استمتعت بتوقعاتنا ⚽\n\n"
-            "للاستمرار في استقبال التوقعات اشترك معنا:\n"
-            "🔹 يوم واحد = 4$\n"
-            "🔹 أسبوع = 15$\n"
-            "🔹 شهر = 50$\n\n"
-            "📞 تواصل مع الإدارة: @betmax_team",
+            "للاستمرار في استقبال التوقعات تواصل مع الإدارة 👇",
+            reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
         )
     except Exception:
@@ -252,7 +254,6 @@ async def add_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🎉 *تم تفعيل اشتراكك!*\n\n"
             f"📅 مدة الاشتراك: *{days} يوم*\n"
             f"🗓️ ينتهي في: *{exp[:10]}*\n\n"
-            f"📢 رابط القناة: {CHANNEL_LINK}\n\n"
             "ستصلك التوقعات تلقائياً ⚽🎯",
             parse_mode="Markdown"
         )
@@ -341,7 +342,20 @@ async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def send_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
-    text = " ".join(context.args)
+
+    # أخذ النص الكامل بعد /send مع الحفاظ على التنسيق والفراغات
+    full_text = update.message.text
+    if "\n" in full_text:
+        text = full_text.split("\n", 1)[1] if full_text.startswith("/send") else full_text
+        first_line = full_text.split("\n")[0]
+        after_cmd = first_line[5:].strip()  # ما بعد /send في السطر الأول
+        if after_cmd:
+            text = after_cmd + "\n" + "\n".join(full_text.split("\n")[1:])
+        else:
+            text = "\n".join(full_text.split("\n")[1:])
+    else:
+        text = full_text[5:].strip()  # إزالة /send فقط
+
     if not text:
         await update.message.reply_text("📝 الاستخدام:\n`/send نص التوقع هنا`", parse_mode="Markdown")
         return
@@ -362,7 +376,12 @@ async def send_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     failed = 0
     for uid in ids:
         try:
-            await context.bot.send_message(uid, f"⚽ *توقع جديد!*\n\n{text}", parse_mode="Markdown")
+            # إرسال الرسالة بنفس التنسيق تماماً بدون أي إضافات
+            await context.bot.copy_message(
+                chat_id=uid,
+                from_chat_id=update.effective_chat.id,
+                message_id=update.message.message_id
+            )
             sent += 1
         except Exception:
             failed += 1
@@ -384,16 +403,13 @@ async def check_subscriptions(context: ContextTypes.DEFAULT_TYPE):
     ).fetchall()
     conn.close()
     for u in users:
-        # إرسال رسالة انتهاء الاشتراك
+        keyboard = [[InlineKeyboardButton("💬 تواصل مع الإدارة", url="https://t.me/betmax_team")]]
         try:
             await context.bot.send_message(
                 u['user_id'],
                 "⏰ *انتهى اشتراكك!*\n\n"
-                "للاستمرار في استقبال التوقعات اشترك معنا:\n"
-                "🔹 يوم واحد = 4$\n"
-                "🔹 أسبوع = 15$\n"
-                "🔹 شهر = 50$\n\n"
-                "📞 تواصل مع الإدارة: @betmax_team",
+                "للتجديد تواصل مع الإدارة 👇",
+                reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="Markdown"
             )
         except Exception:
