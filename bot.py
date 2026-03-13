@@ -109,15 +109,20 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = f"@{query.from_user.username}" if query.from_user.username else "بدون يوزر"
 
     if query.data == "register":
-        await query.message.reply_text("📩 تم إرسال طلب اشتراكك للإدارة.\nسيتم التواصل معك قريباً ✅")
-        await context.bot.send_message(
-            ADMIN_ID,
-            f"📥 *طلب اشتراك جديد*\n\n"
-            f"🆔 ID: `{user_id}`\n"
-            f"👤 اليوزر: {username}\n"
-            f"📅 الوقت: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-            parse_mode="Markdown"
-        )
+        try:
+            await context.bot.send_message(
+                ADMIN_ID,
+                f"📥 *طلب اشتراك جديد*\n\n"
+                f"🆔 ID: `{user_id}`\n"
+                f"👤 اليوزر: {username}\n"
+                f"📅 الوقت: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+                f"لتفعيل الاشتراك: `/add {user_id} 30`",
+                parse_mode="Markdown"
+            )
+            await query.message.reply_text("📩 تم إرسال طلب اشتراكك للإدارة.\nسيتم التواصل معك قريباً ✅")
+        except Exception as e:
+            logger.error(f"Failed to notify admin: {e}")
+            await query.message.reply_text("📩 تم استلام طلبك.\nسيتم التواصل معك قريباً ✅")
 
     elif query.data == "trial":
         # تحقق إن كان استخدم التجربة من قبل
@@ -149,14 +154,17 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         # إشعار الإدارة
-        await context.bot.send_message(
-            ADMIN_ID,
-            f"🎁 *تجربة مجانية مُفعَّلة*\n\n"
-            f"🆔 ID: `{user_id}`\n"
-            f"👤 اليوزر: {username}\n"
-            f"📅 تنتهي: {end_of_day.strftime('%Y-%m-%d 23:59')}",
-            parse_mode="Markdown"
-        )
+        try:
+            await context.bot.send_message(
+                ADMIN_ID,
+                f"🎁 *تجربة مجانية مُفعَّلة*\n\n"
+                f"🆔 ID: `{user_id}`\n"
+                f"👤 اليوزر: {username}\n"
+                f"📅 تنتهي: {end_of_day.strftime('%Y-%m-%d 23:59')}",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify admin about trial: {e}")
 
         # جدولة رسالة انتهاء الاشتراك
         seconds_until_end = (end_of_day - datetime.now()).total_seconds()
